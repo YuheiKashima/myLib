@@ -35,7 +35,7 @@ namespace myLib {
 		ThreadPool();
 		~ThreadPool();
 
-		void RegisterTask(std::shared_ptr<ThreadTask> _pTask);
+		void RegisterTask(std::shared_ptr<ThreadTask> _task);
 		void WakeUp();
 		void WaitForIdle();
 		void Termination();
@@ -52,13 +52,19 @@ namespace myLib {
 		**/
 		class inPoolThread {
 		public:
-			inPoolThread(int32_t _index, ThreadPool* _pParent);
+			inPoolThread();
 			~inPoolThread();
 
+			void RegisterTask(std::shared_ptr<ThreadTask> _task);
+
+			void Initialization(int32_t _index, ThreadPool* _pParent);
 			void WakeUp();
 			void WaitForIdle();
 			void Termination();
+
+			std::thread::id GetCurrentThreadId() const { return m_Thread.get_id(); }
 		private:
+			void WaitForInitialization();
 			void WorkThreadFunc();
 
 			bool m_isTermination = false;
@@ -68,9 +74,14 @@ namespace myLib {
 			std::mutex m_Mutex;
 			std::condition_variable m_CondVariable;
 
-			std::optional<ThreadPool*> m_pParent;
+			std::shared_ptr<ThreadTask> mp_Task = nullptr;
+
+			std::optional<ThreadPool*> mp_Parent;
 		};
 
+		int32_t GetCurrentThreadIndex();
+
+		static int32_t ms_InstanceCount;
 		static std::vector<std::unique_ptr<inPoolThread>> ms_Threads;
 		static bool ms_isTermination;
 		static std::deque<std::shared_ptr<ThreadTask>> ms_GlobalTaskQ;
@@ -80,4 +91,4 @@ namespace myLib {
 	};
 }
 
-#endif // !_THREADPOOL
+#endif // !_THREADPOOLÅ@
