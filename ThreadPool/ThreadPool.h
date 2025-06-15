@@ -5,7 +5,7 @@
 	@details   ~
 	@author    Yuhei kashima
 	@date      27.02.2025
-
+	参考：https://zenn.dev/rita0222/articles/13953a5dfb9698
 	指針：リアルタイムなスレッド数変更を禁止（必ず再起動させる）
 **/
 

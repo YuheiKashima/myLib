@@ -11,7 +11,7 @@
 #define AVX_ALIEN_RANGE 32
 
 namespace myLib {
-	//Reference:https://qiita.com/Gaccho/items/e936de237676120aa8a0
+	//éQçl:https://qiita.com/Gaccho/items/e936de237676120aa8a0
 	template<typename T>
 	class LineBuffer_XY {
 	public:
