@@ -14,12 +14,17 @@
 #include <thread>
 
 namespace myLib {
+
 	class ThreadTask {
 	public:
 		ThreadTask();
 		~ThreadTask();
 
 		virtual void Execute(std::thread::id _workingId) = 0;
+	protected:
+
+	private:
+
 	};
 }
 

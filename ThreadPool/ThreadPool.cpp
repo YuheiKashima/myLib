@@ -148,6 +148,7 @@ std::string ThreadPool::GetThreadsState() const {
 			state << "Unknown";
 			break;
 		}
+		state << " Queue Size: " << inThread.second->GetQueueSize() << " | ";
 		state << endl;
 	}
 	return state.str();

@@ -31,6 +31,9 @@
 #pragma comment(lib,"TimeStamp.lib")
 
 namespace myLib {
+
+	
+
 	/**
 
 		@class   ThreadPool
