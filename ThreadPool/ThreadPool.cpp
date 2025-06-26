@@ -6,52 +6,59 @@ using namespace std;
 atomic<int32_t>											ThreadPool::ms_InstanceCount = 0;
 map<thread::id, shared_ptr<ThreadPool::inPoolThread>>	ThreadPool::ms_Threads;
 bool													ThreadPool::ms_isTermination = false;
-deque<shared_ptr<ThreadTask>>							ThreadPool::ms_GlobalTaskQ;
+deque<shared_ptr<ThreadPool>>							ThreadPool::ms_GlobalTaskQ;
 mutex													ThreadPool::ms_Mutex;
 condition_variable										ThreadPool::ms_CondVariable;
 const int32_t											ThreadPool::ms_MinimumRequirements = 3;
 const int32_t 											ThreadPool::ms_DefaultRequirements = 4;
 
-/**
-	@brief ThreadPool object constructor
-	@details スレッドプールの初期化を行う
-**/
-ThreadPool::ThreadPool(size_t _orderthreads) {
+ThreadPool::ThreadPool() {
 	if (ms_InstanceCount++ <= 0) {
-		if (_orderthreads < ms_MinimumRequirements) {
-			_orderthreads = ms_MinimumRequirements;
-		}
-
-		for (size_t i = 0; i < _orderthreads; ++i) {
-			auto thread = make_shared<inPoolThread>(this);
-			ms_Threads.emplace(thread->GetId(), thread);
-		}
 	}
 }
 
 ThreadPool::~ThreadPool() {
 	if (--ms_InstanceCount <= 0) {
-		//最後のインスタンスの時だけスレッドプールを解放
-		WaitForIdle();
-		Termination();
 	}
+}
+
+/**
+	@brief スレッドプールの初期化
+	@param _orderthreads - スレッドプールに登録するスレッド数
+	@details スレッド数が指定されていない場合はデフォルト値を使用する
+**/
+void ThreadPool::Initalize(size_t _orderthreads) {
+	if (!ms_Threads.empty())
+		return;
+
+	if (_orderthreads < ms_MinimumRequirements) {
+		_orderthreads = ms_MinimumRequirements;
+	}
+	for (size_t i = 0; i < _orderthreads; ++i) {
+		auto thread = make_shared<inPoolThread>();
+		ms_Threads.emplace(thread->GetId(), thread);
+	}
+	Logger::Logging(Logger::ELoggingLevel::LOGLV_INFO, "Thread pool initialized with {} threads", ms_Threads.size());
+	ms_isTermination = false;
 }
 
 #ifdef _DEBUG
 /**
 	@brief タスク登録 ※デバッグ機能
-	@param _task            - 登録タスク
 	@param d_orderThreadIdx - 登録するスレッドのインデックス（範囲外の場合は通常のタスク登録メソッドへ転送）
 	@param _wakeupImmediately - タスク登録後にスレッドを起こすかどうか
 **/
-void ThreadPool::RegisterTask(shared_ptr<ThreadTask> _task, int32_t d_orderThreadIdx, bool _wakeupImmediately) {
+void ThreadPool::RegisterTask(int32_t d_orderThreadIdx, bool _wakeupImmediately) {
+	if (ms_isTermination || ms_Threads.empty())
+		return;
+
 	if (0 <= d_orderThreadIdx && d_orderThreadIdx < ms_Threads.size()) {
 		for (int32_t i = 0; auto& inThread:ms_Threads) {
 			if (i++ != d_orderThreadIdx) {
 				continue;
 			}
 			Logger::Logging(Logger::ELoggingLevel::LOGLV_DEBUG, "Register task -> [id: {} ]", inThread.first);
-			inThread.second->RegisterTask(_task);
+			inThread.second->RegisterTask(shared_from_this());
 		}
 		if (_wakeupImmediately) {
 			WakeUp();
@@ -59,18 +66,17 @@ void ThreadPool::RegisterTask(shared_ptr<ThreadTask> _task, int32_t d_orderThrea
 	}
 	else {
 		Logger::Logging(Logger::ELoggingLevel::LOGLV_WARN, "Ordered out of range thread index. call normal register function.");
-		RegisterTask(_task, _wakeupImmediately);
+		RegisterTask(_wakeupImmediately);
 	}
 }
 #endif // _DEBUG
 
 /**
 	@brief タスク登録
-	@param _pTask - class ThreadTaskを継承したクラスのポインタ
 	@param _wakeupImmidiately - タスク登録後にスレッドを起こすかどうか(デフォルト：true)
 **/
-void ThreadPool::RegisterTask(shared_ptr<ThreadTask> _task, bool _wakeupImmidiately) {
-	if (ms_isTermination)
+void ThreadPool::RegisterTask(bool _wakeupImmidiately) {
+	if (ms_isTermination || ms_Threads.empty())
 		return;
 
 	{
@@ -79,12 +85,12 @@ void ThreadPool::RegisterTask(shared_ptr<ThreadTask> _task, bool _wakeupImmidiat
 		auto itr = ms_Threads.find(this_thread::get_id());
 		if (itr != ms_Threads.end()) {
 			//再帰呼び出しの場合ローカルキューに登録
-			itr->second->RegisterTask(_task);
+			itr->second->RegisterTask(shared_from_this());
 			Logger::Logging(Logger::ELoggingLevel::LOGLV_INFO, "Recursive registration task [id: {} ] -> [id: {} ]", itr->first, itr->first);
 		}
 		else {
 			//再帰呼び出しでない場合グローバルキューに登録
-			ms_GlobalTaskQ.emplace_back(_task);
+			ms_GlobalTaskQ.emplace_back(shared_from_this());
 			Logger::Logging(Logger::ELoggingLevel::LOGLV_INFO, "Registerd task : task -> [Global queue]");
 		}
 		if (_wakeupImmidiately)
@@ -97,6 +103,9 @@ void ThreadPool::RegisterTask(shared_ptr<ThreadTask> _task, bool _wakeupImmidiat
 	@details アイドル状態解除のオーダーを飛ばすだけで、解除条件が整っていなければ再度アイドル状態になる
 **/
 void ThreadPool::WakeUp() {
+	if (ms_isTermination || ms_Threads.empty())
+		return;
+
 	for (auto& inThread : ms_Threads) {
 		inThread.second->WakeUp();
 	}
@@ -106,9 +115,12 @@ void ThreadPool::WakeUp() {
 	@brief スレッド群のアイドル状態を待つ
 **/
 void ThreadPool::WaitForIdle() {
+	if (ms_isTermination || ms_Threads.empty())
+		return;
+
 	{
 		unique_lock<mutex> lock(ms_Mutex);
-		ms_CondVariable.wait(lock, [this]() {return ms_GlobalTaskQ.empty() || ms_isTermination; });
+		ms_CondVariable.wait(lock, [&]() {return ms_GlobalTaskQ.empty() || ms_isTermination; });
 	}
 	for (auto& inThread : ms_Threads) {
 		inThread.second->WaitForIdle();
@@ -119,6 +131,9 @@ void ThreadPool::WaitForIdle() {
 	@brief スレッドプール解放
 **/
 void ThreadPool::Termination() {
+	if (ms_isTermination || ms_Threads.empty())
+		return;
+
 	{
 		unique_lock<mutex> lock(ms_Mutex);
 		ms_isTermination = true;
@@ -130,7 +145,10 @@ void ThreadPool::Termination() {
 	Logger::Logging(Logger::ELoggingLevel::LOGLV_INFO, "Terminated thread pool");
 }
 
-std::string ThreadPool::GetThreadsState() const {
+std::string ThreadPool::GetThreadsState() {
+	if (ms_isTermination || ms_Threads.empty())
+		return "ThreadPool is not initialized or already terminated.";
+
 	std::stringstream state;
 	for (const auto& inThread : ms_Threads) {
 		state << "Thread ID: " << inThread.first << " State: ";
@@ -158,13 +176,13 @@ std::string ThreadPool::GetThreadsState() const {
 	@brief
 	@retval  -
 **/
-std::optional<std::shared_ptr<ThreadTask>> ThreadPool::GetTaskFromGrobalQueue() {
+std::optional<std::shared_ptr<ThreadPool>> ThreadPool::GetTaskFromGrobalQueue() {
 	unique_lock<mutex> lock(ms_Mutex);
 
 	if (ms_GlobalTaskQ.empty())
 		return nullopt;
 
-	shared_ptr<ThreadTask> task = ms_GlobalTaskQ.front();
+	shared_ptr<ThreadPool> task = ms_GlobalTaskQ.front();
 	ms_GlobalTaskQ.pop_front();
 
 	Logger::Logging(Logger::ELoggingLevel::LOGLV_INFO, "Get task [Global Queue] -> [id: {} ]", this_thread::get_id());
@@ -177,7 +195,7 @@ std::optional<std::shared_ptr<ThreadTask>> ThreadPool::GetTaskFromGrobalQueue() 
 	@brief
 	@retval  -
 **/
-std::optional<std::shared_ptr<ThreadTask>> ThreadPool::StealTaskFromOtherThread() {
+std::optional<std::shared_ptr<ThreadPool>> ThreadPool::StealTaskFromOtherThread() {
 	const thread::id currentThreadIdx = this_thread::get_id();
 
 	optional<thread::id> idx;
@@ -194,7 +212,7 @@ std::optional<std::shared_ptr<ThreadTask>> ThreadPool::StealTaskFromOtherThread(
 
 	//待機中タスクが最も多いスレッドからタスクを奪取
 	if (idx.has_value()) {
-		std::optional<std::shared_ptr<ThreadTask>> stealedTask = ms_Threads[idx.value()]->StealTask();
+		std::optional<std::shared_ptr<ThreadPool>> stealedTask = ms_Threads[idx.value()]->StealTask();
 		if (stealedTask) {
 			Logger::Logging(Logger::ELoggingLevel::LOGLV_INFO, "Steal task [id: {0} ] -> [id: {1} ]", idx.value(), currentThreadIdx);
 			return stealedTask;
@@ -205,7 +223,7 @@ std::optional<std::shared_ptr<ThreadTask>> ThreadPool::StealTaskFromOtherThread(
 }
 
 //==============================================================================================
-ThreadPool::inPoolThread::inPoolThread(ThreadPool* _pParent) :mp_Parent(_pParent), m_isTermination(false) {
+ThreadPool::inPoolThread::inPoolThread() :m_isTermination(false) {
 	m_Thread = thread(&inPoolThread::WorkFunc, this);
 }
 
@@ -220,7 +238,7 @@ ThreadPool::inPoolThread::~inPoolThread() {
 	@brief スレッドのローカルキューにタスクを登録する
 	@param _task -
 **/
-void ThreadPool::inPoolThread::RegisterTask(shared_ptr<ThreadTask> _task) {
+void ThreadPool::inPoolThread::RegisterTask(std::shared_ptr<ThreadPool> _task) {
 	unique_lock<mutex> lock(m_Mutex);
 	m_LocalTaskQ.emplace_back(_task);
 }
@@ -255,13 +273,13 @@ void ThreadPool::inPoolThread::Termination() {
 	@brief
 	@retval  -
 **/
-optional<shared_ptr<ThreadTask>> ThreadPool::inPoolThread::StealTask() {
+optional<shared_ptr<ThreadPool>> ThreadPool::inPoolThread::StealTask() {
 	unique_lock<mutex> lock(m_Mutex);
 
 	if (m_LocalTaskQ.empty())
 		return nullopt;
 
-	shared_ptr<ThreadTask> task = m_LocalTaskQ.front();
+	shared_ptr<ThreadPool> task = m_LocalTaskQ.front();
 	m_LocalTaskQ.pop_front();
 
 	m_CondVariable.notify_all();
@@ -272,13 +290,13 @@ optional<shared_ptr<ThreadTask>> ThreadPool::inPoolThread::StealTask() {
 	@brief ワークスレッド
 **/
 void ThreadPool::inPoolThread::WorkFunc() {
-	auto GetorStealTask = [&]() -> optional<shared_ptr<ThreadTask>> {
-		optional<shared_ptr<ThreadTask>> task = nullopt;
+	auto GetorStealTask = [&]() -> optional<shared_ptr<ThreadPool>> {
+		optional<shared_ptr<ThreadPool>> task = nullopt;
 		//ローカルキューが空なら他スレッドの待機中のタスクを奪取
-		task = mp_Parent.value()->StealTaskFromOtherThread();
+		task = ThreadPool::StealTaskFromOtherThread();
 		if (!task.has_value())
 			//他スレッドの待機中タスクがない場合グローバルキューからタスクを取得
-			task = mp_Parent.value()->GetTaskFromGrobalQueue();
+			task = ThreadPool::GetTaskFromGrobalQueue();
 
 		return task;
 		};

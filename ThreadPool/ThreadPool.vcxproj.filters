@@ -18,15 +18,9 @@
     <ClCompile Include="ThreadPool.cpp">
       <Filter>ソース ファイル</Filter>
     </ClCompile>
-    <ClCompile Include="ThreadTask.cpp">
-      <Filter>ソース ファイル</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ThreadPool.h">
-      <Filter>ソース ファイル</Filter>
-    </ClInclude>
-    <ClInclude Include="ThreadTask.h">
       <Filter>ソース ファイル</Filter>
     </ClInclude>
   </ItemGroup>

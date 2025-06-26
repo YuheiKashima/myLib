@@ -15,8 +15,20 @@
 
 using namespace myLib;
 
-class TestThread :public ThreadTask {
+class TestPool :public ThreadPool {
 public:
+	void Run() {
+		RegisterTask();
+	}
+
+	void Run(int32_t _orderThreadIdx, bool _wakeupImmidiately = true) {
+		RegisterTask(_orderThreadIdx, _wakeupImmidiately);
+	}
+
+	void WakeUp() {
+		ThreadPool::WakeUp();
+	}
+private:
 	void Execute(std::thread::id _workingId) override {
 		int32_t delta = m_Delta.load();
 		m_Delta += 10; // Increment the delta for the next run
@@ -24,19 +36,20 @@ public:
 		std::this_thread::sleep_for(std::chrono::milliseconds(delta));
 		Logger::Logging(Logger::ELoggingLevel::LOGLV_INFO, "Thread work done threadid:{}, delta was {} ms", _workingId, delta);
 	}
-private:
+
 	static std::atomic<int32_t> m_Delta;
 };
-std::atomic<int32_t> TestThread::m_Delta = 10;
+std::atomic<int32_t> TestPool::m_Delta = 10;
 
-class TestPool :public ThreadPool {
+class Test {
 public:
-	TestPool() {
-		alpla = std::make_shared<TestThread>();
-		beta = std::make_shared<TestThread>();
-		gamma = std::make_shared<TestThread>();
-		delta = std::make_shared<TestThread>();
-		epsilon = std::make_shared<TestThread>();
+	Test() {
+		ThreadPool::Initalize(5);
+		alpla = std::make_shared<TestPool>();
+		beta = std::make_shared<TestPool>();
+		gamma = std::make_shared<TestPool>();
+		delta = std::make_shared<TestPool>();
+		epsilon = std::make_shared<TestPool>();
 	}
 
 	void Run() {
@@ -69,35 +82,35 @@ private:
 
 			if (input.GetTrigger('1')) {
 				std::cout << "1 pressed" << std::endl;
-				RegisterTask(alpla, 0, false);
+				alpla->Run(1, false);
 			}
 
 			if (input.GetTrigger('2')) {
 				std::cout << "2 pressed" << std::endl;
-				RegisterTask(beta, 1);
+				beta->Run(2, false);
 			}
 
 			if (input.GetTrigger('3')) {
 				std::cout << "3 pressed" << std::endl;
-				RegisterTask(gamma, 2);
+				gamma->Run(3, false);
 			}
 
 			if (input.GetTrigger('4')) {
 				std::cout << "4 pressed" << std::endl;
-				RegisterTask(delta, 3);
+				delta->Run();
 			}
 
 			if (input.GetTrigger('5')) {
 				std::cout << "5 pressed" << std::endl;
-				RegisterTask(epsilon, 4);
+				epsilon->Run();
 			}
 
 			if (input.GetTrigger(VK_SPACE)) {
-				WakeUp();
+				ThreadPool::WakeUp();
 			}
 
 			if (input.GetTrigger('0')) {
-				Logger::Logging(Logger::ELoggingLevel::LOGLV_INFO, "{}", GetThreadsState());
+				Logger::Logging(Logger::ELoggingLevel::LOGLV_INFO, "{}", ThreadPool::GetThreadsState());
 			}
 
 			std::this_thread::sleep_for(std::chrono::milliseconds(33));
@@ -110,12 +123,11 @@ private:
 	bool g_exit = false;
 	InstantInput input;
 
-	ThreadPool threadPool;
-	std::shared_ptr<TestThread> alpla, beta, gamma, delta, epsilon;
+	std::shared_ptr<TestPool> alpla, beta, gamma, delta, epsilon;
 };
 
 int main(int argc, char* argv[]) {
-	TestPool test;
+	Test test;
 	test.Run();
 	return 0;
 }

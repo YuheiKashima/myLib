@@ -152,11 +152,9 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="ThreadPool.cpp" />
-    <ClCompile Include="ThreadTask.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ThreadPool.h" />
-    <ClInclude Include="ThreadTask.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
