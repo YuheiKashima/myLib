@@ -6,6 +6,7 @@ using namespace std;
 ofstream Logger::ms_LogStream;
 string Logger::ms_LogColorString = {};
 function<void(const string)> Logger::ms_LogOutputFunc;
+recursive_mutex Logger::ms_LogMutex;
 
 /**
 	@fn    Open

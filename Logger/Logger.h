@@ -19,6 +19,8 @@
 #include <string>
 #include <source_location>
 #include <format>
+#include <mutex>
+#include <mutex>
 
 #include <TimeStamp.h>
 
@@ -68,8 +70,10 @@ namespace myLib {
 		static constexpr std::string Logging(const std::format_string<Args...> _log, Args&&... _logFormat) {
 			if (!ms_LogStream)return "";
 
+			ms_LogMutex.lock();
+
 			std::stringstream strstr;
-			
+
 			strstr << std::format("{}: {}", TimeStamp::GetTime_str(), std::format(_log, std::forward<Args>(_logFormat)...)) << std::endl;
 
 			ms_LogStream << strstr.str();
@@ -87,8 +91,10 @@ namespace myLib {
 				ms_LogColorString.clear();
 			}
 
+			std::string dest = strstr.str();
+			ms_LogMutex.unlock();
 
-			return strstr.str();
+			return dest;
 		}
 
 		/**
@@ -103,6 +109,8 @@ namespace myLib {
 		template <typename... Args>
 		static constexpr std::string Logging(const ELoggingLevel _level, const std::format_string<Args...> _log, Args&&... _logFormat) {
 			if (!ms_LogStream)return "";
+
+			ms_LogMutex.lock();
 
 			std::stringstream strstr;
 			switch (_level) {
@@ -134,7 +142,11 @@ namespace myLib {
 				throw std::runtime_error("An ELoggingLevel outside the defined range is used.");
 			}
 
-			return Logging("{}{}", strstr.str(), std::format(_log, std::forward<Args>(_logFormat)...));
+			std::string dest = Logging("{}{}", strstr.str(), std::format(_log, std::forward<Args>(_logFormat)...));
+
+			ms_LogMutex.unlock();
+
+			return dest;
 		}
 
 		/**
@@ -151,12 +163,17 @@ namespace myLib {
 		static constexpr std::string Logging(const ELoggingLevel _level, const std::source_location _sourceLocation, const std::format_string<Args...> _log, Args&&... _logFormat) {
 			if (!ms_LogStream)return "";
 
+			ms_LogMutex.lock();
+
 			std::stringstream strstr;
 			const std::string fileDir = std::format("{}", _sourceLocation.file_name());
 			const int32_t pos = fileDir.find_last_of("\\");
 			strstr << std::format(" {} [Locate {}:Line {}] ", fileDir.substr(pos + 1), _sourceLocation.function_name(), _sourceLocation.line());
 
-			return Logging(_level, "{}{}", strstr.str(), std::format(_log, std::forward<Args>(_logFormat)...));
+			std::string dest = Logging(_level, "{}{}", strstr.str(), std::format(_log, std::forward<Args>(_logFormat)...));
+
+			ms_LogMutex.unlock();
+			return dest;
 		}
 		/**
 			@fn     is_Open
@@ -175,6 +192,7 @@ namespace myLib {
 		static std::ofstream ms_LogStream;
 		static std::string ms_LogColorString;
 		static std::function<void(const std::string)> ms_LogOutputFunc;
+		static std::recursive_mutex ms_LogMutex;
 	};
 }
 
