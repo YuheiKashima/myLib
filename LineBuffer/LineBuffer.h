@@ -220,9 +220,6 @@ namespace myLib {
 		}
 
 	private:
-		std::shared_ptr<T[]> m_arr_real;
-		size_t m_Size_x = 0, m_Size_y = 0, m_Capacity_x = 0;
-
 		void create(const size_t _y, const size_t _x) {
 			m_Size_x = _x == 0 ? 1 : _x;
 			m_Size_y = _y == 0 ? 1 : _y;
@@ -296,6 +293,9 @@ namespace myLib {
 			auto mod = _range % AVX_ALIEN_RANGE;
 			return _range + (AVX_ALIEN_RANGE - mod);
 		}
+
+		std::shared_ptr<T[]> m_arr_real;
+		size_t m_Size_x = 0, m_Size_y = 0, m_Capacity_x = 0;
 	};
 };
 //óvëfî‘çÜíTçıéÆ((y*m_Size_x)+x)

@@ -76,11 +76,11 @@ namespace myLib {
 			@brief
 		**/
 		void RegisterTask(bool _wakeupImmediately = true) override {
-			if (m_SharedReserveFuture.size() == m_ConnectedCount) {
+			if (m_ReserveArgsFutures.size() == m_ConnectedCount) {
 				ThreadPool::RegisterTask();
 			}
 			else {
-				Logger::Logging(Logger::ELoggingLevel::LOGLV_WARN, "Not all connected nodes have registered futures. Current count: {}, Expected count: {}", m_SharedReserveFuture.size(), m_ConnectedCount.load());
+				Logger::Logging(Logger::ELoggingLevel::LOGLV_WARN, "Not all connected nodes have registered futures. Current count: {}, Expected count: {}", m_ReserveArgsFutures.size(), m_ConnectedCount.load());
 			}
 		}
 
@@ -88,10 +88,10 @@ namespace myLib {
 			@brief
 			@param _future -
 		**/
-		void RegisterFuture(std::shared_future<std::tuple<Args...>> _future) {
+		void RegisterFuture(std::future<std::tuple<Args...>> _future) {
 			std::lock_guard<std::mutex> lock(m_FutureMutex);
-			m_SharedReserveFuture.emplace_back(std::move(_future));
-			Logger::Logging(Logger::ELoggingLevel::LOGLV_INFO, "Registered Future. Current count: {} Expected count:{}", m_SharedReserveFuture.size(), m_ConnectedCount.load());
+			m_ReserveArgsFutures.emplace_back(std::move(_future));
+			Logger::Logging(Logger::ELoggingLevel::LOGLV_INFO, "Registered Future. Current count: {} Expected count:{}", m_ReserveArgsFutures.size(), m_ConnectedCount.load());
 		}
 
 		/**
@@ -110,7 +110,7 @@ namespace myLib {
 			@brief
 		**/
 		virtual void PostNodeProcess(std::tuple<Args...> _args) {
-			DisconnectInvalidFutures();
+			DeregisterInvalidFutures();
 		}
 
 		/**
@@ -118,7 +118,7 @@ namespace myLib {
 			@retval  -
 		**/
 		constexpr size_t GetArgsCount() const {
-			return m_SharedReserveFuture.size();
+			return m_ReserveArgsFutures.size();
 		}
 
 		/**
@@ -127,23 +127,34 @@ namespace myLib {
 			@retval        -
 		**/
 		std::tuple<Args...> WaitFutureAndGetArgs(int32_t _index) const {
-			if (_index < 0 || _index >= static_cast<int32_t>(m_SharedReserveFuture.size())) {
+			if (_index < 0 || _index >= static_cast<int32_t>(m_ReserveArgsFutures.size())) {
 				throw std::out_of_range("Index out of range");
 			}
-			return m_SharedReserveFuture[_index].get();
+			return m_ReserveArgsFutures[_index].get();
 		}
 
 		/**
 			@brief
 			@param _args -
 		**/
-		void SetArgChildNode(std::tuple<Args...> _args) {
+		void PromiseArgChildNode(std::tuple<Args...> _args) {
 			if (m_ChildNodes.empty()) {
 				Logger::Logging(Logger::ELoggingLevel::LOGLV_INFO, "No child nodes connected.");
 				return;
 			}
-
-			m_SendPromise.set_value(_args);
+			if (m_SendArgsPromises.empty()) {
+				Logger::Logging(Logger::ELoggingLevel::LOGLV_WARN, "No promises available to send arguments to child nodes.");
+				return;
+			}
+			for (size_t i = 0; auto& promise : m_SendArgsPromises) {
+				if (promise.valid()) {
+					promise.set_value(_args);
+				}
+				else {
+					Logger::Logging(Logger::ELoggingLevel::LOGLV_WARN, "Promise at index {} is not valid.", i);
+				}
+				++i;
+			}
 		}
 
 	private:
@@ -160,13 +171,16 @@ namespace myLib {
 			@brief 子ノードをThreadPoolにタスクを登録
 		**/
 		void RegisterTaskConnectedNodes() {
-			std::shared_future<std::tuple<Args...>> s_future = this->m_SendPromise.get_future().share();
-			for (const auto& child : m_ChildNodes) {
-				if (auto node = child.lock()) {
-					node->RegisterFuture(s_future);
-					node->RegisterTask();
+			ShrinkNodes();
+			std::vector<std::promise<std::tuple<Args...>>> promises(m_ChildNodes.size());
+
+			for (size_t i = 0; auto& child : m_ChildNodes) {
+				if (auto childPtr = child.lock()) {
+					childPtr->m_ReserveArgsFutures.RegisterFuture(promises[i].get_future());
+					childPtr->registerTask();
 				}
 			}
+			m_SendArgsPromises = std::move(promises);
 		}
 
 		/**
@@ -177,16 +191,17 @@ namespace myLib {
 			erase_if(m_ChildNodes, [&](const std::weak_ptr<Node>& child) {
 				return child.expired();
 				});
+
 			return m_ChildNodes.size();
 		}
 
 		/**
 			@brief 無効なFutureを削除
 		**/
-		void DisconnectInvalidFutures() {
-			std::lock_guard<std::mutex> lock(m_FutureMutex);
-			erase_if(m_SharedReserveFuture, [&](const std::shared_future<std::tuple<Args...>>& future) {
-				return !future.valid();
+		void DeregisterInvalidFutures() {
+			std::unique_lock<std::mutex> lock(m_FutureMutex);
+			std::erase_if(m_ReserveArgsFutures, [&](const std::future<std::tuple<Args...>>& _future) {
+				return _future.valid() == false;
 				});
 		}
 
