@@ -22,7 +22,8 @@
 #include <mutex>
 #include <mutex>
 
-#include <TimeStamp.h>
+#include <TimeStamp/TimeStamp.h>
+#pragma comment(lib,"TimeStamp.lib")
 
 namespace myLib {
 	/**

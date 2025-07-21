@@ -22,8 +22,8 @@
 #include <condition_variable>
 #include <map>
 
-#include <Logger.h>
-#include <TimeStamp.h>
+#include <Logger/Logger.h>
+#include <TimeStamp/TimeStamp.h>
 
 #pragma comment(lib,"Logger.lib")
 #pragma comment(lib,"TimeStamp.lib")
@@ -54,11 +54,12 @@ namespace myLib {
 		static void WakeUp();
 		static void WaitForIdle();
 		static void Termination();
+
 	protected:
 #ifdef _DEBUG
-		void RegisterTask(int32_t d_orderThreadIdx, bool _wakeupImmediately = true);
+		virtual void RegisterTask(int32_t d_orderThreadIdx, bool _wakeupImmediately = true);
 #endif
-		void RegisterTask(bool _wakeupImmediately = true);
+		virtual void RegisterTask(bool _wakeupImmediately = true);
 
 		virtual void Execute(std::thread::id _id) = 0;
 

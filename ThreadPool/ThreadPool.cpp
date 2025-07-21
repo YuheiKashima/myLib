@@ -38,64 +38,8 @@ void ThreadPool::Initalize(size_t _orderthreads) {
 		auto thread = make_shared<inPoolThread>();
 		ms_Threads.emplace(thread->GetId(), thread);
 	}
-	Logger::Logging(Logger::ELoggingLevel::LOGLV_INFO, "Thread pool initialized with {} threads", ms_Threads.size());
+	Logger::Logging(Logger::ELoggingLevel::LOGLV_DEBUG, "Thread pool initialized with {} threads", ms_Threads.size());
 	ms_isTermination = false;
-}
-
-#ifdef _DEBUG
-/**
-	@brief タスク登録 ※デバッグ機能
-	@param d_orderThreadIdx - 登録するスレッドのインデックス（範囲外の場合は通常のタスク登録メソッドへ転送）
-	@param _wakeupImmediately - タスク登録後にスレッドを起こすかどうか
-**/
-void ThreadPool::RegisterTask(int32_t d_orderThreadIdx, bool _wakeupImmediately) {
-	if (ms_isTermination || ms_Threads.empty())
-		return;
-
-	if (0 <= d_orderThreadIdx && d_orderThreadIdx < ms_Threads.size()) {
-		for (int32_t i = 0; auto& inThread:ms_Threads) {
-			if (i++ != d_orderThreadIdx) {
-				continue;
-			}
-			Logger::Logging(Logger::ELoggingLevel::LOGLV_DEBUG, "Register task -> [id: {} ]", inThread.first);
-			inThread.second->RegisterTask(shared_from_this());
-		}
-		if (_wakeupImmediately) {
-			WakeUp();
-		}
-	}
-	else {
-		Logger::Logging(Logger::ELoggingLevel::LOGLV_WARN, "Ordered out of range thread index. call normal register function.");
-		RegisterTask(_wakeupImmediately);
-	}
-}
-#endif // _DEBUG
-
-/**
-	@brief タスク登録
-	@param _wakeupImmidiately - タスク登録後にスレッドを起こすかどうか(デフォルト：true)
-**/
-void ThreadPool::RegisterTask(bool _wakeupImmidiately) {
-	if (ms_isTermination || ms_Threads.empty())
-		return;
-
-	{
-		unique_lock<mutex> lock(ms_Mutex);
-
-		auto itr = ms_Threads.find(this_thread::get_id());
-		if (itr != ms_Threads.end()) {
-			//再帰呼び出しの場合ローカルキューに登録
-			itr->second->RegisterTask(shared_from_this());
-			Logger::Logging(Logger::ELoggingLevel::LOGLV_INFO, "Recursive registration task [id: {} ] -> [id: {} ]", itr->first, itr->first);
-		}
-		else {
-			//再帰呼び出しでない場合グローバルキューに登録
-			ms_GlobalTaskQ.emplace_back(shared_from_this());
-			Logger::Logging(Logger::ELoggingLevel::LOGLV_INFO, "Registerd task : task -> [Global queue]");
-		}
-		if (_wakeupImmidiately)
-			WakeUp();
-	}
 }
 
 /**
@@ -142,7 +86,7 @@ void ThreadPool::Termination() {
 	for (auto& inThread : ms_Threads) {
 		inThread.second->Termination();
 	}
-	Logger::Logging(Logger::ELoggingLevel::LOGLV_INFO, "Terminated thread pool");
+	Logger::Logging(Logger::ELoggingLevel::LOGLV_DEBUG, "Terminated thread pool");
 }
 
 std::string ThreadPool::GetThreadsState() {
@@ -172,6 +116,62 @@ std::string ThreadPool::GetThreadsState() {
 	return state.str();
 }
 
+#ifdef _DEBUG
+/**
+	@brief タスク登録 ※デバッグ機能
+	@param d_orderThreadIdx - 登録するスレッドのインデックス（範囲外の場合は通常のタスク登録メソッドへ転送）
+	@param _wakeupImmediately - タスク登録後にスレッドを起こすかどうか
+**/
+void ThreadPool::RegisterTask(int32_t d_orderThreadIdx, bool _wakeupImmediately) {
+	if (ms_isTermination || ms_Threads.empty())
+		return;
+
+	if (0 <= d_orderThreadIdx && d_orderThreadIdx < ms_Threads.size()) {
+		for (int32_t i = 0; auto& inThread:ms_Threads) {
+			if (i++ != d_orderThreadIdx) {
+				continue;
+			}
+			Logger::Logging(Logger::ELoggingLevel::LOGLV_DEBUG, "Register task -> [id: {} ]", inThread.first);
+			inThread.second->RegisterTask(shared_from_this());
+		}
+		if (_wakeupImmediately) {
+			WakeUp();
+		}
+	}
+	else {
+		Logger::Logging(Logger::ELoggingLevel::LOGLV_WARN, "Ordered out of range thread index. call normal register function.");
+		RegisterTask(_wakeupImmediately);
+	}
+}
+#endif // _DEBUG
+
+/**
+	@brief タスク登録
+	@param _wakeupImmidiately - タスク登録後にスレッドを起こすかどうか(デフォルト：true)
+**/
+void ThreadPool::RegisterTask(bool _wakeupImmidiately) {
+	if (ms_isTermination || ms_Threads.empty())
+		return;
+
+	{
+		unique_lock<mutex> lock(ms_Mutex);
+
+		auto itr = ms_Threads.find(this_thread::get_id());
+		if (itr != ms_Threads.end()) {
+			//再帰呼び出しの場合ローカルキューに登録
+			itr->second->RegisterTask(shared_from_this());
+			Logger::Logging(Logger::ELoggingLevel::LOGLV_DEBUG, "Recursive registration task [id: {} ] -> [id: {} ]", itr->first, itr->first);
+		}
+		else {
+			//再帰呼び出しでない場合グローバルキューに登録
+			ms_GlobalTaskQ.emplace_back(shared_from_this());
+			Logger::Logging(Logger::ELoggingLevel::LOGLV_DEBUG, "Registerd task : task -> [Global queue]");
+		}
+		if (_wakeupImmidiately)
+			WakeUp();
+	}
+}
+
 /**
 	@brief
 	@retval  -
@@ -185,7 +185,7 @@ std::optional<std::shared_ptr<ThreadPool>> ThreadPool::GetTaskFromGrobalQueue() 
 	shared_ptr<ThreadPool> task = ms_GlobalTaskQ.front();
 	ms_GlobalTaskQ.pop_front();
 
-	Logger::Logging(Logger::ELoggingLevel::LOGLV_INFO, "Get task [Global Queue] -> [id: {} ]", this_thread::get_id());
+	Logger::Logging(Logger::ELoggingLevel::LOGLV_DEBUG, "Get task [Global Queue] -> [id: {} ]", this_thread::get_id());
 
 	ms_CondVariable.notify_all();
 	return task;
@@ -214,7 +214,7 @@ std::optional<std::shared_ptr<ThreadPool>> ThreadPool::StealTaskFromOtherThread(
 	if (idx.has_value()) {
 		std::optional<std::shared_ptr<ThreadPool>> stealedTask = ms_Threads[idx.value()]->StealTask();
 		if (stealedTask) {
-			Logger::Logging(Logger::ELoggingLevel::LOGLV_INFO, "Steal task [id: {0} ] -> [id: {1} ]", idx.value(), currentThreadIdx);
+			Logger::Logging(Logger::ELoggingLevel::LOGLV_DEBUG, "Steal task [id: {0} ] -> [id: {1} ]", idx.value(), currentThreadIdx);
 			return stealedTask;
 		}
 	}
@@ -270,7 +270,7 @@ void ThreadPool::inPoolThread::Termination() {
 }
 
 /**
-	@brief
+	@brief 待機中タスクをローカルキューから奪取する
 	@retval  -
 **/
 optional<shared_ptr<ThreadPool>> ThreadPool::inPoolThread::StealTask() {
@@ -314,6 +314,7 @@ void ThreadPool::inPoolThread::WorkFunc() {
 			}
 		}
 
+		//ローカルキューが空なら他スレッドからタスクを奪取、またはグローバルキューからタスクを取得
 		if (!mp_CurrentTask.has_value()) {
 			mp_CurrentTask = GetorStealTask();
 		}
@@ -331,7 +332,6 @@ void ThreadPool::inPoolThread::WorkFunc() {
 				}
 
 				lock.unlock();
-				//タスク取得
 				mp_CurrentTask = GetorStealTask();
 				lock.lock();
 
@@ -342,13 +342,13 @@ void ThreadPool::inPoolThread::WorkFunc() {
 				}
 				else {
 					m_State = ThreadState::Idle;
-					//Logger::Logging(Logger::ELoggingLevel::LOGLV_INFO, "Thread {} is waiting for task", this_thread::get_id());
+					//Logger::Logging(Logger::ELoggingLevel::LOGLV_DEBUG, "Thread {} is waiting for task", this_thread::get_id());
 					return false;
 				}
 				});
 
 			if (m_isTermination) {
-				Logger::Logging(Logger::ELoggingLevel::LOGLV_INFO, "Terminated thread [id: {}]", this_thread::get_id());
+				Logger::Logging(Logger::ELoggingLevel::LOGLV_DEBUG, "Terminated thread [id: {}]", this_thread::get_id());
 				break; // 終了フラグが立っている場合はループを抜ける
 			}
 		}

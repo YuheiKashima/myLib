@@ -4,7 +4,8 @@
 #include <algorithm>
 #include <memory>
 
-#include <CPUSupportChecker.h>
+#include <CPUSupportChecker/CPUSupportChecker.h>
+#pragma comment(lib, "CPUSupportChecker.lib")
 
 //AVX
 # include <immintrin.h>

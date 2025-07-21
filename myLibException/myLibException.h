@@ -13,7 +13,8 @@
 
 #include <exception>
 
-#include <Logger.h>
+#include <Logger/Logger.h>
+#pragma comment(lib,"Logger.lib")
 
 #ifdef _WIN32
 

@@ -1,7 +1,8 @@
 #ifndef _MCPUTIMER_
 #define _MCPUTIMER_
 
-#include <MemPtrHelper.h>
+#include <MemPtrHelper/MemPtrHelper.h>
+#pragma comment(lib, "MemPtrHelper.lib")
 
 #include <cmath>
 #include <numeric>
