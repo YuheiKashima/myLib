@@ -20,7 +20,7 @@
 #include <source_location>
 #include <format>
 #include <mutex>
-#include <mutex>
+#include <map>
 
 #include <TimeStamp/TimeStamp.h>
 #pragma comment(lib,"TimeStamp.lib")
@@ -50,6 +50,11 @@ namespace myLib {
 			LOGLV_ERROR = 0x10,
 			LOGLV_FATAL = 0x20,
 			LOBLV_ALL = LOGLV_TRACE | LOGLV_DEBUG | LOGLV_INFO | LOGLV_WARN | LOGLV_ERROR | LOGLV_FATAL
+		};
+
+		enum class ETextLineOption {
+			TEXTLINEOPT_NORMAL = 0,//通常
+			TEXTLINEOPT_FILL = 1//塗りつぶし
 		};
 
 		/**
@@ -114,37 +119,34 @@ namespace myLib {
 			ms_LogMutex.lock();
 
 			std::stringstream strstr;
-			switch (_level) {
-			case ELoggingLevel::LOGLV_TRACE:
-				ms_LogColorString = "\x1b[38;2;255;255;255m";
-				strstr << "[Trace]";
-				break;
-			case ELoggingLevel::LOGLV_DEBUG:
-				ms_LogColorString = "\x1b[38;2;0;255;0m";
-				strstr << "[Debug]";
-				break;
-			case ELoggingLevel::LOGLV_INFO:
-				ms_LogColorString = "\x1b[38;2;0;0;255m";
-				strstr << "[Info]";
-				break;
-			case ELoggingLevel::LOGLV_WARN:
-				ms_LogColorString = "\x1b[38;2;255;254;59m";
-				strstr << "[Warning]";
-				break;
-			case ELoggingLevel::LOGLV_ERROR:
-				ms_LogColorString = "\x1b[38;2;255;0;0m";
-				strstr << "[Error]";
-				break;
-			case ELoggingLevel::LOGLV_FATAL:
-				ms_LogColorString = "\x1b[48;2;255;0;0m";
-				strstr << "[Fatal]";
-				break;
-			default:
-				throw std::runtime_error("An ELoggingLevel outside the defined range is used.");
+			if (ms_LogColorString.empty()) {
+				switch (_level) {
+				case ELoggingLevel::LOGLV_TRACE:
+					ms_LogColorString = "\x1b[38;2;255;255;255m";
+					break;
+				case ELoggingLevel::LOGLV_DEBUG:
+					ms_LogColorString = "\x1b[38;2;0;255;0m";
+					break;
+				case ELoggingLevel::LOGLV_INFO:
+					ms_LogColorString = "\x1b[38;2;0;0;255m";
+					break;
+				case ELoggingLevel::LOGLV_WARN:
+					ms_LogColorString = "\x1b[38;2;255;254;59m";
+					break;
+				case ELoggingLevel::LOGLV_ERROR:
+					ms_LogColorString = "\x1b[38;2;255;0;0m";
+					break;
+				case ELoggingLevel::LOGLV_FATAL:
+					ms_LogColorString = "\x1b[48;2;255;0;0m";
+					break;
+				default:
+					throw std::runtime_error("An ELoggingLevel outside the defined range is used.");
+				}
 			}
 
 			std::string dest = Logging("{}{}", strstr.str(), std::format(_log, std::forward<Args>(_logFormat)...));
 
+			ms_LogColorString.clear();
 			ms_LogMutex.unlock();
 
 			return dest;
@@ -176,6 +178,7 @@ namespace myLib {
 			ms_LogMutex.unlock();
 			return dest;
 		}
+
 		/**
 			@fn     is_Open
 			@brief
@@ -189,7 +192,37 @@ namespace myLib {
 			@param	_logCallbackFunc -ログコールバック関数 -void (const std::string)
 		**/
 		static void SetLogOutputCallback(std::function<void(const std::string)> _logCallbackFunc) { ms_LogOutputFunc = _logCallbackFunc; }
+
+		/**
+			@brief
+			@param  _textLineOpt -
+			@param  _red         -
+			@param  _green       -
+			@param  _blue        -
+			@retval              -
+		**/
+		static void SetLogColor(ETextLineOption _textLineOpt, uint8_t _red, uint8_t _green, uint8_t _blue) {
+			ms_LogMutex.lock();
+			ms_LogColorString = "";
+
+			ms_LogColorString += "\x1b[";
+			switch (_textLineOpt) {
+			case myLib::Logger::ETextLineOption::TEXTLINEOPT_NORMAL:
+				ms_LogColorString += "38;2;";
+				break;
+			case myLib::Logger::ETextLineOption::TEXTLINEOPT_FILL:
+				ms_LogColorString += "48;2;";
+				break;
+			default:
+				break;
+			}
+
+			ms_LogColorString += std::to_string(_red) + ";" + std::to_string(_green) + ";" + std::to_string(_blue) + "m";
+			ms_LogMutex.unlock();
+		}
 	private:
+
+		static const std::map<ELoggingLevel, std::string> ms_LoglevelStrMap;
 		static std::ofstream ms_LogStream;
 		static std::string ms_LogColorString;
 		static std::function<void(const std::string)> ms_LogOutputFunc;

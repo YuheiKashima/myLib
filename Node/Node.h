@@ -11,6 +11,7 @@
 #ifndef _NODE_
 #define _NODE_
 
+#include <vector>
 #include <future>
 #include <tuple>
 
@@ -29,88 +30,87 @@ namespace myLib {
 	template<typename... Args>
 	class Node :public ThreadPool {
 	public:
-		Node() {
-		}
+		Node() = default;
 
 		Node(const Node&) = delete;
 		Node(Node&&) = delete;
 		Node& operator=(const Node&) = delete;
 		Node& operator=(Node&&) = delete;
 
-		virtual ~Node() {
-		}
+		virtual ~Node() = default;
 
 		/**
-			@brief 引数のFutureを子ノードに登録
+			@brief 子ノード登録
 			@param  _node -
 			@retval       -
 		**/
-		constexpr size_t Connect(const std::shared_ptr<Node>& _node) {
-			if (!_node) return 0;
-			m_ChildNodes.emplace_back(_node);
-			_node.get()->m_ConnectedCount++;
-			return ShrinkNodes();
-		}
+		constexpr size_t ConnectChildNode(const std::shared_ptr<Node>& _node) {
+			std::lock_guard<std::mutex> lock(m_ChildNodesMutex);
 
-		/**
-			@brief 引数のNodeを切断
-			@param  _node -
-			@retval       -
-		**/
-		constexpr size_t Disconnect(const std::shared_ptr<Node>& _node) {
-			if (!_node) return 0;
-			auto it = find_if(m_ChildNodes.begin(), m_ChildNodes.end(),
-				[&](const std::weak_ptr<Node>& child) {
-					return child.lock() == _node;
-				});
-			if (it != m_ChildNodes.end()) {
-				it.lock()->m_ConnectedCount--;
-				m_ChildNodes.erase(it);
+			// 既に登録されている場合は登録しない
+			for (const auto& wpNode : m_ChildNodes) {
+				if (auto spNode = wpNode.lock(); spNode == _node) {
+					return ShlinkExpiredChildNodes();
+				}
 			}
-			return ShrinkNodes();
+
+			m_ChildNodes.emplace_back(_node);
+			return ShlinkExpiredChildNodes();
+		}
+
+		/**
+			@brief 子ノード削除
+			@param  _node -
+			@retval       -
+		**/
+		constexpr size_t DisconnectChildNode(const std::shared_ptr<Node>& _node) {
+			std::lock_guard<std::mutex> lock(m_ChildNodesMutex);
+			std::erase_if(m_ChildNodes, [&_node](const std::weak_ptr<Node>& wpNode) {
+				if (auto spNode = wpNpde.lock(); spNode) {
+					return spNode == _node;
+				}
+				}
+			);
+			return ShlinkExpiredChildNodes();
+		}
+
+		/**
+			@brief スレッドプールにタスクを登録
+			@param _wakeupImmediately - 登録と同時にスレッドを起こすか
+		**/
+		void RegisterTask(bool _wakeupImmediately = true) override {
+		}
+
+		/**
+			@brief タスク実行
+		**/
+		void Run() {
 		}
 
 	protected:
 
 		/**
 			@brief
-		**/
-		void RegisterTask(bool _wakeupImmediately = true) override {
-			if (m_ReserveArgsFutures.size() == m_ConnectedCount) {
-				ThreadPool::RegisterTask();
-			}
-			else {
-				Logger::Logging(Logger::ELoggingLevel::LOGLV_WARN, "Not all connected nodes have registered futures. Current count: {}, Expected count: {}", m_ReserveArgsFutures.size(), m_ConnectedCount.load());
-			}
-		}
-
-		/**
-			@brief
 			@param _future -
 		**/
 		void RegisterFuture(std::future<std::tuple<Args...>> _future) {
-			std::lock_guard<std::mutex> lock(m_FutureMutex);
-			m_ReserveArgsFutures.emplace_back(std::move(_future));
-			Logger::Logging(Logger::ELoggingLevel::LOGLV_INFO, "Registered Future. Current count: {} Expected count:{}", m_ReserveArgsFutures.size(), m_ConnectedCount.load());
 		}
 
 		/**
-			@brief
+			@brief 事前処理
 		**/
 		virtual void PreNodeProcess() {
-			RegisterTaskConnectedNodes();
 		}
 
 		/**
-			@brief
+			@brief メイン処理
 		**/
 		virtual std::tuple<Args...> NodeExecute() = 0;
 
 		/**
-			@brief
+			@brief 事後処理
 		**/
 		virtual void PostNodeProcess(std::tuple<Args...> _args) {
-			DeregisterInvalidFutures();
 		}
 
 		/**
@@ -118,48 +118,26 @@ namespace myLib {
 			@retval  -
 		**/
 		constexpr size_t GetArgsCount() const {
-			return m_ReserveArgsFutures.size();
 		}
 
 		/**
-			@brief IndexのFutureを待機し、引数を取得
+			@brief IndexのFutureを待機し、内容を取得
 			@param  _index -
 			@retval        -
 		**/
-		std::tuple<Args...> WaitFutureAndGetArgs(int32_t _index) const {
-			if (_index < 0 || _index >= static_cast<int32_t>(m_ReserveArgsFutures.size())) {
-				throw std::out_of_range("Index out of range");
-			}
-			return m_ReserveArgsFutures[_index].get();
+		std::tuple<Args...> WaitFutureAndGetArgs(int32_t _index) {
 		}
 
 		/**
-			@brief
+			@brief 子ノードにPromiseを送信
 			@param _args -
 		**/
 		void PromiseArgChildNode(std::tuple<Args...> _args) {
-			if (m_ChildNodes.empty()) {
-				Logger::Logging(Logger::ELoggingLevel::LOGLV_INFO, "No child nodes connected.");
-				return;
-			}
-			if (m_SendArgsPromises.empty()) {
-				Logger::Logging(Logger::ELoggingLevel::LOGLV_WARN, "No promises available to send arguments to child nodes.");
-				return;
-			}
-			for (size_t i = 0; auto& promise : m_SendArgsPromises) {
-				if (promise.valid()) {
-					promise.set_value(_args);
-				}
-				else {
-					Logger::Logging(Logger::ELoggingLevel::LOGLV_WARN, "Promise at index {} is not valid.", i);
-				}
-				++i;
-			}
 		}
 
 	private:
 		/**
-			@brief 実行
+			@brief スレッドプール継承実行処理
 			@param _id -
 		**/
 		void Execute(std::thread::id _id) override {
@@ -171,45 +149,24 @@ namespace myLib {
 			@brief 子ノードをThreadPoolにタスクを登録
 		**/
 		void RegisterTaskConnectedNodes() {
-			ShrinkNodes();
-			std::vector<std::promise<std::tuple<Args...>>> promises(m_ChildNodes.size());
-
-			for (size_t i = 0; auto& child : m_ChildNodes) {
-				if (auto childPtr = child.lock()) {
-					childPtr->m_ReserveArgsFutures.RegisterFuture(promises[i].get_future());
-					childPtr->registerTask();
-				}
-			}
-			m_SendArgsPromises = std::move(promises);
 		}
 
 		/**
-			@brief 無効な子ノードを削除
-			@retval  -
+			@brief 子ノードの弱参照が切れているものを削除
+			@retval  - 更新後の子ノード数
 		**/
-		constexpr size_t ShrinkNodes() {
-			erase_if(m_ChildNodes, [&](const std::weak_ptr<Node>& child) {
-				return child.expired();
-				});
-
+		size_t ShlinkExpiredChildNodes() {
+			std::lock_guard<std::mutex> lock(m_ChildNodesMutex);
+			std::erase_if(m_ChildNodes, [](const std::weak_ptr<Node>& wp) { return wp.expired(); });
 			return m_ChildNodes.size();
 		}
 
-		/**
-			@brief 無効なFutureを削除
-		**/
-		void DeregisterInvalidFutures() {
-			std::unique_lock<std::mutex> lock(m_FutureMutex);
-			std::erase_if(m_ReserveArgsFutures, [&](const std::future<std::tuple<Args...>>& _future) {
-				return _future.valid() == false;
-				});
-		}
-
-		std::atomic<size_t> m_ConnectedCount = 0;
+		std::atomic<size_t> m_CntConnectedParentNode = 0;
 
 		std::mutex m_FutureMutex;
 		std::vector<std::future<std::tuple<Args...>>> m_ReserveArgsFutures;
 
+		std::mutex m_ChildNodesMutex;
 		std::vector<std::weak_ptr<Node>> m_ChildNodes;
 		std::vector<std::promise<std::tuple<Args...>>> m_SendArgsPromises;
 	};

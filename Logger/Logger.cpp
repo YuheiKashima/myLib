@@ -3,6 +3,14 @@
 using namespace myLib;
 using namespace std;
 
+const std::map<Logger::ELoggingLevel, std::string> Logger::ms_LoglevelStrMap = {
+	{Logger::ELoggingLevel::LOGLV_TRACE,"[Trace]"},
+	{Logger::ELoggingLevel::LOGLV_DEBUG,"[Debug]"},
+	{Logger::ELoggingLevel::LOGLV_INFO,"[Info]"},
+	{Logger::ELoggingLevel::LOGLV_WARN,"[Warning]"},
+	{Logger::ELoggingLevel::LOGLV_ERROR,"[Error]"},
+	{Logger::ELoggingLevel::LOGLV_FATAL,"[Fatal]"}
+};
 ofstream Logger::ms_LogStream;
 string Logger::ms_LogColorString = {};
 function<void(const string)> Logger::ms_LogOutputFunc;
