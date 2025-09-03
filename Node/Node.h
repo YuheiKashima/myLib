@@ -65,12 +65,12 @@ namespace myLib {
 		**/
 		constexpr size_t DisconnectChildNode(const std::shared_ptr<Node>& _node) {
 			std::lock_guard<std::mutex> lock(m_ChildNodesMutex);
-			std::erase_if(m_ChildNodes, [&_node](const std::weak_ptr<Node>& wpNode) {
+			/*std::erase_if(m_ChildNodes, [&_node](const std::weak_ptr<Node>& wpNode) {
 				if (auto spNode = wpNpde.lock(); spNode) {
 					return spNode == _node;
 				}
 				}
-			);
+			);*/
 			return ShlinkExpiredChildNodes();
 		}
 
