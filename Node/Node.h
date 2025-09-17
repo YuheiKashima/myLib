@@ -46,7 +46,7 @@ namespace myLib {
 			@param  _node -
 			@retval       -
 		**/
-		constexpr size_t ConnectChildNode(const std::shared_ptr<Node>& _node) {
+		size_t ConnectChildNode(const std::shared_ptr<Node>& _node) {
 			std::lock_guard<std::mutex> lock(m_ChildNodesMutex);
 
 			// 既に登録されている場合は登録しない
@@ -57,6 +57,7 @@ namespace myLib {
 			}
 
 			m_ChildNodes.emplace_back(_node);
+			_node.m_CntConnectedParentNode++;
 			return ShlinkExpiredChildNodes();
 		}
 
@@ -65,14 +66,21 @@ namespace myLib {
 			@param  _node -
 			@retval       -
 		**/
-		constexpr size_t DisconnectChildNode(const std::shared_ptr<Node>& _node) {
+		size_t DisconnectChildNode(const std::shared_ptr<Node>& _node) {
 			std::lock_guard<std::mutex> lock(m_ChildNodesMutex);
-			/*std::erase_if(m_ChildNodes, [&_node](const std::weak_ptr<Node>& wpNode) {
-				if (auto spNode = wpNpde.lock(); spNode) {
-					return spNode == _node;
+			std::erase_if(m_ChildNodes, [&_node](const std::weak_ptr<Node>& wpNode) {
+				if (auto spNode = wpNode.lock(); spNode) {
+					if (spNode == _node) {
+						_node->m_CntConnectedParentNode--;
+						return true;
+					}
+					else {
+						return false;
+					}
+					return false;
 				}
 				}
-			);*/
+			);
 			return ShlinkExpiredChildNodes();
 		}
 
@@ -81,27 +89,64 @@ namespace myLib {
 			@param _wakeupImmediately - 登録と同時にスレッドを起こすか
 		**/
 		void RegisterTask(bool _wakeupImmediately = true) override {
+			ThreadPool::RegisterTask(_wakeupImmediately);
 		}
 
 		/**
 			@brief タスク実行
 		**/
 		void Run() {
+			ThreadPool::WakeUp();
 		}
 
 	protected:
 
 		/**
-			@brief
+			@brief Future登録
 			@param _future -
 		**/
-		void RegisterFuture(Future<Arg> _future) {
+		void RegisterFuture(myLib::Future<Arg> _future) {
+			std::lock_guard<std::mutex> lock(m_FutureMutex);
+			m_ReserveArgsFutures.emplace_back(_future);
+		}
+
+		/**
+			@brief Future削除
+			@param _future -
+		**/
+		void RemoveFuture(myLib::Future<Arg> _future) {
+			std::lock_guard<std::mutex> lock(m_FutureMutex);
+			std::erase_if(m_ReserveArgsFutures, [&_future](const myLib::Future<Arg>& future) {
+				return &future == &_future;
+				});
+		}
+
+		/**
+			@brief Futureサイズを取得
+			@retval  -
+		**/
+		size_t GetArgsCount() const {
+			std::lock_guard<std::mutex> lock(m_FutureMutex);
+			return m_ReserveArgsFutures.size();
+		}
+
+		/**
+			@brief IndexのFutureを待機し、内容を取得
+			@param  _index -
+			@retval        -
+		**/
+		Arg WaitFutureAndGetArgs(int32_t _index) {
+			std::lock_guard<std::mutex> lock(m_FutureMutex);
+			if (_index < 0 || static_cast<size_t>(_index) >= m_ReserveArgsFutures.size())
+				throw MyLibException(Logger::ELoggingLevel::LOGLV_ERROR, std::source_location::current(), "Node::WaitFutureAndGetArgs() : Index out of range.");
+			return m_ReserveArgsFutures[_index].reserve();
 		}
 
 		/**
 			@brief 事前処理
 		**/
 		virtual void PreNodeProcess() {
+			RegisterTaskConnectedNodes();
 		}
 
 		/**
@@ -113,21 +158,12 @@ namespace myLib {
 			@brief 事後処理
 		**/
 		virtual void PostNodeProcess(Arg _args) {
-		}
+			m_SendArgsPromises(_args);
 
-		/**
-			@brief Futureサイズを取得
-			@retval  -
-		**/
-		constexpr size_t GetArgsCount() const {
-		}
-
-		/**
-			@brief IndexのFutureを待機し、内容を取得
-			@param  _index -
-			@retval        -
-		**/
-		Arg WaitFutureAndGetArgs(int32_t _index) {
+			// 登録されているFutureを全てリセット
+			for (auto& future : m_ReserveArgsFutures) {
+				future.reset();
+			}
 		}
 
 		/**
@@ -135,6 +171,10 @@ namespace myLib {
 			@param _args -
 		**/
 		void PromiseArgChildNode(Arg _args) {
+			std::lock_guard<std::mutex> lock(m_ChildNodesMutex);
+			for (auto& promise : m_SendArgsPromises) {
+				promise.send(_args);
+			}
 		}
 
 	private:
@@ -151,6 +191,12 @@ namespace myLib {
 			@brief 子ノードをThreadPoolにタスクを登録
 		**/
 		void RegisterTaskConnectedNodes() {
+			std::lock_guard<std::mutex> lock(m_ChildNodesMutex);
+			for (const auto& wpNode : m_ChildNodes) {
+				if (auto spNode = wpNode.lock(); spNode) {
+					spNode->RegisterTask();
+				}
+			}
 		}
 
 		/**
@@ -166,11 +212,11 @@ namespace myLib {
 		std::atomic<size_t> m_CntConnectedParentNode{ 0 };
 
 		std::mutex m_FutureMutex;
-		std::vector<Future<Arg>> m_ReserveArgsFutures;
+		std::vector<myLib::Future<Arg>> m_ReserveArgsFutures;
 
 		std::mutex m_ChildNodesMutex;
 		std::vector<std::weak_ptr<Node>> m_ChildNodes;
-		std::vector<Promise<Arg>> m_SendArgsPromises;
+		std::vector<myLib::Promise<Arg>> m_SendArgsPromises;
 	};
 }
 #endif // _NODE_

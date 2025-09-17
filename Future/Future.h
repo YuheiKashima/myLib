@@ -74,7 +74,7 @@ namespace myLib {
 		**/
 		void reset() {
 			std::lock_guard<std::mutex> lock(*m_spMutex);
-			if (*m_spState != FutureState::Reserved)
+			if (*m_spState != FutureState::Reserved && *m_spState != FutureState::Send_Ready)
 				throw MyLibException(Logger::ELoggingLevel::LOGLV_ERROR, std::source_location::current(), "Future::reset() : Future state invalid for reset.");
 
 			m_spArgs->reset();
