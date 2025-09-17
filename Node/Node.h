@@ -12,11 +12,13 @@
 #define _NODE_
 
 #include <vector>
-#include <future>
 #include <tuple>
 
 #include <ThreadPool/ThreadPool.h>
 #pragma comment(lib, "ThreadPool.lib")
+
+#include <Future/Future.h>
+#pragma comment(lib, "Future.lib")
 
 namespace myLib {
 	/**
@@ -27,7 +29,7 @@ namespace myLib {
 		@tparam  Args -
 
 	**/
-	template<typename... Args>
+	template<typename Arg>
 	class Node :public ThreadPool {
 	public:
 		Node() = default;
@@ -93,7 +95,7 @@ namespace myLib {
 			@brief
 			@param _future -
 		**/
-		void RegisterFuture(std::future<std::tuple<Args...>> _future) {
+		void RegisterFuture(Future<Arg> _future) {
 		}
 
 		/**
@@ -105,12 +107,12 @@ namespace myLib {
 		/**
 			@brief メイン処理
 		**/
-		virtual std::tuple<Args...> NodeExecute() = 0;
+		virtual Arg NodeExecute() = 0;
 
 		/**
 			@brief 事後処理
 		**/
-		virtual void PostNodeProcess(std::tuple<Args...> _args) {
+		virtual void PostNodeProcess(Arg _args) {
 		}
 
 		/**
@@ -125,14 +127,14 @@ namespace myLib {
 			@param  _index -
 			@retval        -
 		**/
-		std::tuple<Args...> WaitFutureAndGetArgs(int32_t _index) {
+		Arg WaitFutureAndGetArgs(int32_t _index) {
 		}
 
 		/**
 			@brief 子ノードにPromiseを送信
 			@param _args -
 		**/
-		void PromiseArgChildNode(std::tuple<Args...> _args) {
+		void PromiseArgChildNode(Arg _args) {
 		}
 
 	private:
@@ -161,14 +163,14 @@ namespace myLib {
 			return m_ChildNodes.size();
 		}
 
-		std::atomic<size_t> m_CntConnectedParentNode = 0;
+		std::atomic<size_t> m_CntConnectedParentNode{ 0 };
 
 		std::mutex m_FutureMutex;
-		std::vector<std::future<std::tuple<Args...>>> m_ReserveArgsFutures;
+		std::vector<Future<Arg>> m_ReserveArgsFutures;
 
 		std::mutex m_ChildNodesMutex;
 		std::vector<std::weak_ptr<Node>> m_ChildNodes;
-		std::vector<std::promise<std::tuple<Args...>>> m_SendArgsPromises;
+		std::vector<Promise<Arg>> m_SendArgsPromises;
 	};
 }
 #endif // _NODE_
