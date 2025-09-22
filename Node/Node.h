@@ -11,8 +11,7 @@
 #ifndef _NODE_
 #define _NODE_
 
-#include <vector>
-#include <tuple>
+#include <map>
 
 #include <ThreadPool/ThreadPool.h>
 #pragma comment(lib, "ThreadPool.lib")
@@ -30,7 +29,7 @@ namespace myLib {
 
 	**/
 	template<typename Arg>
-	class Node :public ThreadPool {
+	class Node :public std::enable_shared_from_this<Node<Arg>>, ThreadPool {
 	public:
 		Node() = default;
 
@@ -46,18 +45,23 @@ namespace myLib {
 			@param  _node -
 			@retval       -
 		**/
-		size_t ConnectChildNode(const std::shared_ptr<Node>& _node) {
-			std::lock_guard<std::mutex> lock(m_ChildNodesMutex);
+		size_t ConnectChildNode(const std::shared_ptr<Node<Arg>>& _node) {
+			{
+				std::lock_guard<std::mutex> lock(m_ChildPromiseMutex);
 
-			// 既に登録されている場合は登録しない
-			for (const auto& wpNode : m_ChildNodes) {
-				if (auto spNode = wpNode.lock(); spNode == _node) {
-					return ShlinkExpiredChildNodes();
+				// 既に登録されている場合は登録しない
+				for (const auto& [wpNode, promise] : m_ChildNodePromiseMap) {
+					if (auto spNode = wpNode.lock(); spNode == _node) {
+						myLib::Logger::Logger::Logging(myLib::Logger::ELoggingLevel::LOGLV_WARN, std::source_location::current(), "Node::ConnectChildNode() : Node is already registered.");
+						return ShlinkExpiredChildNodes();
+					}
 				}
-			}
 
-			m_ChildNodes.emplace_back(_node);
-			_node.m_CntConnectedParentNode++;
+				myLib::Promise<Arg> promise;
+				m_ChildNodePromiseMap.emplace(std::make_pair(std::weak_ptr<Node>(_node), promise));
+				_node->ConnectParentNode(shared_from_this(), promise.get_Future());
+				myLib::Logger::Logging(myLib::Logger::ELoggingLevel::LOGLV_INFO, std::source_location::current(), "Node::ConnectChildNode() : Node connected.");
+			}
 			return ShlinkExpiredChildNodes();
 		}
 
@@ -66,21 +70,17 @@ namespace myLib {
 			@param  _node -
 			@retval       -
 		**/
-		size_t DisconnectChildNode(const std::shared_ptr<Node>& _node) {
-			std::lock_guard<std::mutex> lock(m_ChildNodesMutex);
-			std::erase_if(m_ChildNodes, [&_node](const std::weak_ptr<Node>& wpNode) {
-				if (auto spNode = wpNode.lock(); spNode) {
-					if (spNode == _node) {
-						_node->m_CntConnectedParentNode--;
+		size_t DisconnectChildNode(const std::shared_ptr<Node<Arg>>& _node) {
+			{
+				std::lock_guard<std::mutex> lock(m_ChildPromiseMutex);
+				std::erase_if(m_ChildNodePromiseMap, [&_node](const auto& pair) {
+					if (auto spNode = pair.first.lock(); spNode == _node) {
+						myLib::Logger::Logging(myLib::Logger::ELoggingLevel::LOGLV_INFO, std::source_location::current(), "Node::DisconnectChildNode() : Node disconnected.");
 						return true;
 					}
-					else {
-						return false;
-					}
 					return false;
-				}
-				}
-			);
+					});
+			}
 			return ShlinkExpiredChildNodes();
 		}
 
@@ -93,7 +93,7 @@ namespace myLib {
 		}
 
 		/**
-			@brief タスク実行
+			@brief タスク実行 RegisterTask()で_wakeupImmediatelyをfalseにした場合に使用
 		**/
 		void Run() {
 			ThreadPool::WakeUp();
@@ -102,22 +102,25 @@ namespace myLib {
 	protected:
 
 		/**
-			@brief Future登録
+			@brief 親ノード登録
 			@param _future -
 		**/
-		void RegisterFuture(myLib::Future<Arg> _future) {
-			std::lock_guard<std::mutex> lock(m_FutureMutex);
-			m_ReserveArgsFutures.emplace_back(_future);
+		void ConnectParentNode(std::shared_ptr<Node<Arg>>& _parent, myLib::Future<Arg> _future) {
+			std::lock_guard<std::mutex> lock(m_ParentFutureMutex);
+			m_ParentNodeFutureMap.emplace(std::make_pair(std::weak_ptr<Node>(_parent), _future));
 		}
 
 		/**
-			@brief Future削除
+			@brief 親ノード登録解除
 			@param _future -
 		**/
-		void RemoveFuture(myLib::Future<Arg> _future) {
-			std::lock_guard<std::mutex> lock(m_FutureMutex);
-			std::erase_if(m_ReserveArgsFutures, [&_future](const myLib::Future<Arg>& future) {
-				return &future == &_future;
+		void DisconnectParentNode(std::shared_ptr<Node<Arg>>& _parent) {
+			std::lock_guard<std::mutex> lock(m_ParentFutureMutex);
+			std::erase_if(m_ParentNodeFutureMap, [&_parent](const auto& pair) {
+				if (auto spNode = pair.first.lock(); spNode == _parent) {
+					return true;
+				}
+				return false;
 				});
 		}
 
@@ -126,8 +129,7 @@ namespace myLib {
 			@retval  -
 		**/
 		size_t GetArgsCount() const {
-			std::lock_guard<std::mutex> lock(m_FutureMutex);
-			return m_ReserveArgsFutures.size();
+			return m_ParentNodeFutureMap.size();
 		}
 
 		/**
@@ -136,34 +138,32 @@ namespace myLib {
 			@retval        -
 		**/
 		Arg WaitFutureAndGetArgs(int32_t _index) {
-			std::lock_guard<std::mutex> lock(m_FutureMutex);
-			if (_index < 0 || static_cast<size_t>(_index) >= m_ReserveArgsFutures.size())
-				throw MyLibException(Logger::ELoggingLevel::LOGLV_ERROR, std::source_location::current(), "Node::WaitFutureAndGetArgs() : Index out of range.");
-			return m_ReserveArgsFutures[_index].reserve();
+			std::lock_guard<std::mutex> lock(m_ParentFutureMutex);
+			if (_index < 0 || m_ParentNodeFutureMap.size() <= _index)
+				throw myLib::MyLibException(myLib::Logger::ELoggingLevel::LOGLV_ERROR, std::source_location::current(), "Node::WaitFutureAndGetArgs() : Index out of range.");
+
+			auto itr = m_ParentNodeFutureMap.begin();
+			std::advance(itr, _index);
+			return itr->second.reserve();
 		}
 
 		/**
-			@brief 事前処理
+			@brief 事前処理(仮想関数)
 		**/
 		virtual void PreNodeProcess() {
 			RegisterTaskConnectedNodes();
 		}
 
 		/**
-			@brief メイン処理
+			@brief メイン処理(純粋仮想関数)
 		**/
 		virtual Arg NodeExecute() = 0;
 
 		/**
-			@brief 事後処理
+			@brief 事後処理(仮想関数)
 		**/
 		virtual void PostNodeProcess(Arg _args) {
-			m_SendArgsPromises(_args);
-
-			// 登録されているFutureを全てリセット
-			for (auto& future : m_ReserveArgsFutures) {
-				future.reset();
-			}
+			PromiseArgChildNode(_args);
 		}
 
 		/**
@@ -171,10 +171,7 @@ namespace myLib {
 			@param _args -
 		**/
 		void PromiseArgChildNode(Arg _args) {
-			std::lock_guard<std::mutex> lock(m_ChildNodesMutex);
-			for (auto& promise : m_SendArgsPromises) {
-				promise.send(_args);
-			}
+			std::lock_guard<std::mutex> lock(m_ChildPromiseMutex);
 		}
 
 	private:
@@ -191,12 +188,13 @@ namespace myLib {
 			@brief 子ノードをThreadPoolにタスクを登録
 		**/
 		void RegisterTaskConnectedNodes() {
-			std::lock_guard<std::mutex> lock(m_ChildNodesMutex);
-			for (const auto& wpNode : m_ChildNodes) {
+			std::lock_guard<std::mutex> lock(m_ChildPromiseMutex);
+			for (auto& [wpNode, promise] : m_ChildNodePromiseMap) {
 				if (auto spNode = wpNode.lock(); spNode) {
-					spNode->RegisterTask();
+					spNode->RegisterTask(false);
 				}
 			}
+			Run();
 		}
 
 		/**
@@ -204,19 +202,36 @@ namespace myLib {
 			@retval  - 更新後の子ノード数
 		**/
 		size_t ShlinkExpiredChildNodes() {
-			std::lock_guard<std::mutex> lock(m_ChildNodesMutex);
-			std::erase_if(m_ChildNodes, [](const std::weak_ptr<Node>& wp) { return wp.expired(); });
-			return m_ChildNodes.size();
+			std::lock_guard<std::mutex> lock(m_ChildPromiseMutex);
+			std::erase_if(m_ChildNodePromiseMap, [](const auto& pair) {
+				if (pair.first.expired()) {
+					return true;
+				}
+				return false;
+				});
+		}
+
+		/**
+			@brief	親ノードの弱参照が切れているものを削除
+			@retval  - 更新後の親ノード数
+		**/
+		size_t ShilinkExpiredParentNodes() {
+			std::lock_guard<std::mutex> lock(m_ParentFutureMutex);
+			std::erase_if(m_ParentNodeFutureMap, [](const auto& pair) {
+				if (pair.first.expired()) {
+					return true;
+				}
+				return false;
+				});
 		}
 
 		std::atomic<size_t> m_CntConnectedParentNode{ 0 };
 
-		std::mutex m_FutureMutex;
-		std::vector<myLib::Future<Arg>> m_ReserveArgsFutures;
+		std::mutex m_ParentFutureMutex;
+		std::map<std::weak_ptr<Node>, myLib::Future<Arg>> m_ParentNodeFutureMap;
 
-		std::mutex m_ChildNodesMutex;
-		std::vector<std::weak_ptr<Node>> m_ChildNodes;
-		std::vector<myLib::Promise<Arg>> m_SendArgsPromises;
+		std::mutex m_ChildPromiseMutex;
+		std::map<std::weak_ptr<Node>, myLib::Promise<Arg>> m_ChildNodePromiseMap;
 	};
 }
 #endif // _NODE_

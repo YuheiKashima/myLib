@@ -199,7 +199,7 @@ std::optional<std::shared_ptr<ThreadPool>> ThreadPool::StealTaskFromOtherThread(
 	const thread::id currentThreadIdx = this_thread::get_id();
 
 	optional<thread::id> idx;
-	int32_t max = 0;
+	size_t max = 0;
 	for (auto& inThread : ms_Threads) {
 		if (inThread.first == currentThreadIdx)
 			continue;
