@@ -132,7 +132,7 @@ void ThreadPool::RegisterTask(int32_t d_orderThreadIdx, bool _wakeupImmediately)
 				continue;
 			}
 			Logger::Logging(Logger::ELoggingLevel::LOGLV_DEBUG, "Register task -> [id: {} ]", inThread.first);
-			inThread.second->RegisterTask(shared_from_this());
+			inThread.second->RegisterTask(ThreadPool::shared_from_this());
 		}
 		if (_wakeupImmediately) {
 			WakeUp();

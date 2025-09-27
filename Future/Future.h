@@ -23,11 +23,11 @@
 
 namespace myLib {
 	enum class FutureState {
-		None,
-		Not_Ready,
-		Send_Ready,
-		Reserve_Ready,
-		Reserved
+		None,			// 初期状態
+		Not_Ready,		// Promise生成直後(Future未生成)
+		Send_Ready,		// Future生成後(PromiseがArgsを送信可能)
+		Reserve_Ready,	// PromiseがArgsを送信済み(FutureがArgsを受信可能)
+		Reserved		// FutureがArgsを受信済み(PromiseがArgsを送信不可、FutureがArgsを受信不可)
 	};
 
 	/**
@@ -48,10 +48,14 @@ namespace myLib {
 		Future(Future&&) = delete;
 		Future& operator=(const Future&) = delete;
 		Future& operator=(Future&&) = delete;
-		virtual ~Future() = default;
+		~Future() {
+			std::lock_guard<std::mutex> lock(*m_spMutex);
+			m_spArgs->reset();
+			*m_spState = FutureState::Not_Ready;
+		}
 
 		/**
-			@brief
+			@brief Argsを待機し、受信
 			@retval  -
 		**/
 		Args reserve() {
@@ -81,6 +85,15 @@ namespace myLib {
 			*m_spState = FutureState::Send_Ready;
 		}
 
+		/**
+			@brief
+			@retval  -
+		**/
+		bool expired() const {
+			std::lock_guard<std::mutex> lock(*m_spMutex);
+			return *m_spState == FutureState::Not_Ready || *m_spState == FutureState::None;
+		}
+
 	private:
 		Future(std::shared_ptr<std::mutex> _mutex,
 			std::shared_ptr<std::condition_variable> _condVariable,
@@ -104,7 +117,7 @@ namespace myLib {
 	@brief
 	@details ~
 
-**/
+	**/
 	template <typename Args>
 	class Promise {
 	public:
@@ -119,7 +132,11 @@ namespace myLib {
 		Promise(Promise&&) = delete;
 		Promise& operator=(const Promise&) = delete;
 		Promise& operator=(Promise&&) = delete;
-		virtual ~Promise() = default;
+		~Promise() {
+			std::lock_guard<std::mutex> lock(*m_spMutex);
+			m_spArgs->reset();
+			*m_spState = FutureState::None;
+		}
 
 		/**
 			@brief operator=
@@ -159,8 +176,21 @@ namespace myLib {
 		**/
 		myLib::Future<Args> get_Future() {
 			std::lock_guard<std::mutex> lock(*m_spMutex);
+
+			if (*m_spState != FutureState::Not_Ready)
+				throw MyLibException(Logger::ELoggingLevel::LOGLV_ERROR, std::source_location::current(), "Promise::get_Future() : Future is already generated.");
+
 			*m_spState = FutureState::Send_Ready;
 			return Future<Args>(m_spMutex, m_spCondVariable, m_spArgs, m_spState);
+		}
+
+		/**
+			@brief
+			@retval  -
+		**/
+		bool expired() const {
+			std::lock_guard<std::mutex> lock(*m_spMutex);
+			return *m_spState == FutureState::Not_Ready || *m_spState == FutureState::None;
 		}
 
 	private:

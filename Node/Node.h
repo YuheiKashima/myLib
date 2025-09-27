@@ -46,22 +46,25 @@ namespace myLib {
 			@retval       -
 		**/
 		size_t ConnectChildNode(const std::shared_ptr<Node<Arg>>& _node) {
-			{
-				std::lock_guard<std::mutex> lock(m_ChildPromiseMutex);
+			m_ChildPromiseMutex.lock();
 
-				// 既に登録されている場合は登録しない
-				for (const auto& [wpNode, promise] : m_ChildNodePromiseMap) {
-					if (auto spNode = wpNode.lock(); spNode == _node) {
-						myLib::Logger::Logger::Logging(myLib::Logger::ELoggingLevel::LOGLV_WARN, std::source_location::current(), "Node::ConnectChildNode() : Node is already registered.");
-						return ShlinkExpiredChildNodes();
-					}
+			// 既に登録されている場合は登録しない
+			for (const auto& [wpNode, promise] : m_ChildNodePromiseMap) {
+				if (auto spNode = wpNode.lock(); spNode == _node) {
+					myLib::Logger::Logger::Logging(myLib::Logger::ELoggingLevel::LOGLV_WARN, std::source_location::current(), "Node::ConnectChildNode() : Node is already registered.");
+					return ShlinkExpiredChildNodes();
 				}
-
-				myLib::Promise<Arg> promise;
-				m_ChildNodePromiseMap.emplace(std::make_pair(std::weak_ptr<Node>(_node), promise));
-				_node->ConnectParentNode(shared_from_this(), promise.get_Future());
-				myLib::Logger::Logging(myLib::Logger::ELoggingLevel::LOGLV_INFO, std::source_location::current(), "Node::ConnectChildNode() : Node connected.");
 			}
+
+			myLib::Promise<Arg> promise;
+			m_ChildNodePromiseMap.emplace(std::make_pair(std::weak_ptr<Node>(_node), promise));
+
+			std::shared_ptr<Node<Arg>> self = std::static_pointer_cast<Node<Arg>>(Node<Arg>::shared_from_this());
+			_node->ConnectParentNode(self, promise.get_Future());
+			myLib::Logger::Logging(myLib::Logger::ELoggingLevel::LOGLV_INFO, std::source_location::current(), "Node::ConnectChildNode() : Node connected.");
+
+			m_ChildPromiseMutex.unlock();
+
 			return ShlinkExpiredChildNodes();
 		}
 
@@ -71,16 +74,20 @@ namespace myLib {
 			@retval       -
 		**/
 		size_t DisconnectChildNode(const std::shared_ptr<Node<Arg>>& _node) {
-			{
-				std::lock_guard<std::mutex> lock(m_ChildPromiseMutex);
-				std::erase_if(m_ChildNodePromiseMap, [&_node](const auto& pair) {
-					if (auto spNode = pair.first.lock(); spNode == _node) {
-						myLib::Logger::Logging(myLib::Logger::ELoggingLevel::LOGLV_INFO, std::source_location::current(), "Node::DisconnectChildNode() : Node disconnected.");
-						return true;
-					}
-					return false;
-					});
+			m_ChildPromiseMutex.lock();
+
+			for (auto itr = m_ChildNodePromiseMap.begin(); itr != m_ChildNodePromiseMap.end(); ++itr) {
+				if (auto spNode = itr->first.lock(); spNode == _node) {
+					m_ChildNodePromiseMap.erase(itr);
+
+					std::shared_ptr<Node<Arg>> self = std::static_pointer_cast<Node<Arg>>(Node<Arg>::shared_from_this());
+					_node->DisconnectParentNode(self);
+					myLib::Logger::Logging(myLib::Logger::ELoggingLevel::LOGLV_INFO, std::source_location::current(), "Node::DisconnectChildNode() : Node disconnected.");
+					return ShlinkExpiredChildNodes();
+				}
 			}
+
+			m_ChildPromiseMutex.unlock();
 			return ShlinkExpiredChildNodes();
 		}
 
@@ -105,23 +112,39 @@ namespace myLib {
 			@brief 親ノード登録
 			@param _future -
 		**/
-		void ConnectParentNode(std::shared_ptr<Node<Arg>>& _parent, myLib::Future<Arg> _future) {
-			std::lock_guard<std::mutex> lock(m_ParentFutureMutex);
+		size_t ConnectParentNode(const std::shared_ptr<Node<Arg>>& _parent, const myLib::Future<Arg> _future) {
+			m_ParentFutureMutex.lock();
+
+			for (const auto& [wpNode, future] : m_ParentNodeFutureMap) {
+				if (auto spNode = wpNode.lock(); spNode == _parent) {
+					myLib::Logger::Logging(myLib::Logger::ELoggingLevel::LOGLV_WARN, std::source_location::current(), "Node::ConnectParentNode() : Node is already registered.");
+					return ShlinkExpiredParentNodes();
+				}
+			}
+
 			m_ParentNodeFutureMap.emplace(std::make_pair(std::weak_ptr<Node>(_parent), _future));
+			m_ParentFutureMutex.unlock();
+
+			return ShlinkExpiredParentNodes();
 		}
 
 		/**
 			@brief 親ノード登録解除
 			@param _future -
 		**/
-		void DisconnectParentNode(std::shared_ptr<Node<Arg>>& _parent) {
-			std::lock_guard<std::mutex> lock(m_ParentFutureMutex);
-			std::erase_if(m_ParentNodeFutureMap, [&_parent](const auto& pair) {
-				if (auto spNode = pair.first.lock(); spNode == _parent) {
-					return true;
+		size_t DisconnectParentNode(const std::shared_ptr<Node<Arg>>& _parent) {
+			m_ParentFutureMutex.lock();
+
+			for (auto itr = m_ParentNodeFutureMap.begin(); itr != m_ParentNodeFutureMap.end(); ++itr) {
+				if (auto spNode = itr->first.lock(); spNode == _parent) {
+					m_ParentNodeFutureMap.erase(itr);
+					myLib::Logger::Logging(myLib::Logger::ELoggingLevel::LOGLV_INFO, std::source_location::current(), "Node::DisconnectParentNode() : Node disconnected.");
+					return ShlinkExpiredParentNodes();
 				}
-				return false;
-				});
+			}
+
+			m_ParentFutureMutex.unlock();
+			return ShlinkExpiredParentNodes();
 		}
 
 		/**
@@ -138,12 +161,17 @@ namespace myLib {
 			@retval        -
 		**/
 		Arg WaitFutureAndGetArgs(int32_t _index) {
-			std::lock_guard<std::mutex> lock(m_ParentFutureMutex);
+			m_ParentFutureMutex.lock();
+
+			ShlinkExpiredParentNodes();
 			if (_index < 0 || m_ParentNodeFutureMap.size() <= _index)
 				throw myLib::MyLibException(myLib::Logger::ELoggingLevel::LOGLV_ERROR, std::source_location::current(), "Node::WaitFutureAndGetArgs() : Index out of range.");
 
 			auto itr = m_ParentNodeFutureMap.begin();
 			std::advance(itr, _index);
+
+			m_ParentFutureMutex.unlock();
+
 			return itr->second.reserve();
 		}
 
@@ -151,6 +179,8 @@ namespace myLib {
 			@brief 事前処理(仮想関数)
 		**/
 		virtual void PreNodeProcess() {
+			ShlinkExpiredChildNodes();
+			ShlinkExpiredParentNodes();
 			RegisterTaskConnectedNodes();
 		}
 
@@ -215,7 +245,7 @@ namespace myLib {
 			@brief	親ノードの弱参照が切れているものを削除
 			@retval  - 更新後の親ノード数
 		**/
-		size_t ShilinkExpiredParentNodes() {
+		size_t ShlinkExpiredParentNodes() {
 			std::lock_guard<std::mutex> lock(m_ParentFutureMutex);
 			std::erase_if(m_ParentNodeFutureMap, [](const auto& pair) {
 				if (pair.first.expired()) {
@@ -227,10 +257,10 @@ namespace myLib {
 
 		std::atomic<size_t> m_CntConnectedParentNode{ 0 };
 
-		std::mutex m_ParentFutureMutex;
+		std::recursive_mutex m_ParentFutureMutex;
 		std::map<std::weak_ptr<Node>, myLib::Future<Arg>> m_ParentNodeFutureMap;
 
-		std::mutex m_ChildPromiseMutex;
+		std::recursive_mutex m_ChildPromiseMutex;
 		std::map<std::weak_ptr<Node>, myLib::Promise<Arg>> m_ChildNodePromiseMap;
 	};
 }
