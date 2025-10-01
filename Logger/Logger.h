@@ -123,21 +123,27 @@ namespace myLib {
 				switch (_level) {
 				case ELoggingLevel::LOGLV_TRACE:
 					ms_LogColorString = "\x1b[38;2;255;255;255m";
+					strstr << "[Trace]";
 					break;
 				case ELoggingLevel::LOGLV_DEBUG:
 					ms_LogColorString = "\x1b[38;2;0;255;0m";
+					strstr << "[Debug]";
 					break;
 				case ELoggingLevel::LOGLV_INFO:
 					ms_LogColorString = "\x1b[38;2;0;0;255m";
+					strstr << "[Info ]";
 					break;
 				case ELoggingLevel::LOGLV_WARN:
 					ms_LogColorString = "\x1b[38;2;255;254;59m";
+					strstr << "[Warn ]";
 					break;
 				case ELoggingLevel::LOGLV_ERROR:
 					ms_LogColorString = "\x1b[38;2;255;0;0m";
+					strstr << "[Error]";
 					break;
 				case ELoggingLevel::LOGLV_FATAL:
 					ms_LogColorString = "\x1b[48;2;255;0;0m";
+					strstr << "[Fatal]";
 					break;
 				default:
 					throw std::runtime_error("An ELoggingLevel outside the defined range is used.");

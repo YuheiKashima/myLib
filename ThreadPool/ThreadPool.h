@@ -30,6 +30,20 @@
 
 namespace myLib {
 	/**
+		@class   ThreadPoolTask
+		@brief
+		@details ~スレッドプールに登録するタスクの基底クラス
+		@tparam
+		**/
+	class ThreadPoolTask {
+	public:
+		ThreadPoolTask() = default;
+		virtual ~ThreadPoolTask() = default;
+
+		virtual void Execute(std::thread::id _id) = 0;
+	};
+
+	/**
 
 		@class   ThreadPool
 		@brief
@@ -37,7 +51,7 @@ namespace myLib {
 		@tparam
 
 	**/
-	class ThreadPool :public std::enable_shared_from_this<ThreadPool> {
+	class ThreadPool {
 	public:
 		enum class ThreadState {
 			Idle,       //!< スレッドプールがアイドル状態
@@ -45,23 +59,21 @@ namespace myLib {
 			Terminated  //!< スレッドプールが終了状態
 		};
 
-		ThreadPool();
-		virtual ~ThreadPool();
+		static ThreadPool& GetInstance();
 
-		static void Initalize(size_t _orderthreads = ms_DefaultRequirements);
-		static std::string GetThreadsState();
+		void Initalize(size_t _orderthreads = ms_DefaultRequirements);
+		std::string GetThreadsState();
 
-		static void WakeUp();
-		static void WaitForIdle();
-		static void Termination();
+		void WakeUp();
+		void WaitForIdle();
+		void Termination();
+
+		virtual void RegisterTask(std::shared_ptr<ThreadPoolTask> _task, bool _wakeupImmediately = true);
 
 	protected:
 #ifdef _DEBUG
-		virtual void RegisterTask(int32_t d_orderThreadIdx, bool _wakeupImmediately = true);
+		virtual void RegisterTask(std::shared_ptr<ThreadPoolTask> _task, int32_t d_orderThreadIdx, bool _wakeupImmediately = true);
 #endif
-		virtual void RegisterTask(bool _wakeupImmediately = true);
-
-		virtual void Execute(std::thread::id _id) = 0;
 
 	private:
 		/**
@@ -76,13 +88,13 @@ namespace myLib {
 			inPoolThread();
 			~inPoolThread();
 
-			void RegisterTask(std::shared_ptr<ThreadPool> _task);
+			void RegisterTask(std::shared_ptr<ThreadPoolTask> _task);
 
 			void WakeUp();
 			void WaitForIdle();
 			void Termination();
 
-			std::optional<std::shared_ptr<ThreadPool>> StealTask();
+			std::optional<std::shared_ptr<ThreadPoolTask>> StealTask();
 			std::thread::id GetId() const { return m_Thread.get_id(); }
 			const size_t GetQueueSize()const { return m_LocalTaskQ.size(); }
 			const ThreadState GetState() const { return m_State; }
@@ -91,23 +103,31 @@ namespace myLib {
 
 			bool m_isTermination = true;
 			std::thread m_Thread;
-			std::deque<std::shared_ptr<ThreadPool>> m_LocalTaskQ;
-			std::optional<std::shared_ptr<ThreadPool>> mp_CurrentTask;
+			std::deque<std::shared_ptr<ThreadPoolTask>> m_LocalTaskQ;
+			std::optional<std::shared_ptr<ThreadPoolTask>> mp_CurrentTask;
 			std::mutex m_Mutex;
 			std::condition_variable m_CondVariable;
 			ThreadState m_State = ThreadState::Idle;
 		};
 
-		static size_t GetGrobalQueueSize() { return ms_GlobalTaskQ.size(); }
-		static std::optional<std::shared_ptr<ThreadPool>> GetTaskFromGrobalQueue();
-		static std::optional<std::shared_ptr<ThreadPool>> StealTaskFromOtherThread();
+		ThreadPool() = default;
+		~ThreadPool() = default;
 
-		static std::atomic<int32_t> ms_InstanceCount;
-		static std::map<std::thread::id, std::shared_ptr<inPoolThread>> ms_Threads;
-		static bool ms_isTermination;
-		static std::deque<std::shared_ptr<ThreadPool>> ms_GlobalTaskQ;
-		static std::mutex ms_Mutex;
-		static std::condition_variable ms_CondVariable;
+		//コピーコンストラクタ、ムーブコンストラクタ、コピー代入演算子、ムーブ代入演算子を禁止
+		ThreadPool(const ThreadPool&) = delete;
+		ThreadPool& operator=(const ThreadPool&) = delete;
+		ThreadPool(ThreadPool&&) = delete;
+		ThreadPool& operator=(ThreadPool&&) = delete;
+
+		size_t GetGrobalQueueSize() { return m_GlobalTaskQ.size(); }
+		std::optional<std::shared_ptr<ThreadPoolTask>> GetTaskFromGrobalQueue();
+		std::optional<std::shared_ptr<ThreadPoolTask>> StealTaskFromOtherThread();
+
+		std::map<std::thread::id, std::shared_ptr<inPoolThread>> m_Threads;
+		bool m_isTermination = false;
+		std::deque<std::shared_ptr<ThreadPoolTask>> m_GlobalTaskQ;
+		std::mutex m_Mutex;
+		std::condition_variable m_CondVariable;
 		//!< 最低限の動作保障するための必要スレッド数
 		static const int32_t ms_MinimumRequirements;
 		//!< スレッドプールのデフォルトスレッド数
