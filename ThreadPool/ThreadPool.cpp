@@ -83,6 +83,9 @@ std::string ThreadPool::GetThreadsState() {
 		return "ThreadPool is not initialized or already terminated.";
 
 	std::stringstream state;
+
+	state << "Global Queue Size: " << GetGrobalQueueSize() << endl;
+
 	for (const auto& inThread : m_Threads) {
 		state << "Thread ID: " << inThread.first << " State: ";
 		switch (inThread.second->GetState()) {
@@ -319,9 +322,16 @@ void ThreadPool::inPoolThread::WorkFunc() {
 					return true;
 				}
 
-				lock.unlock();
-				mp_CurrentTask = GetorStealTask();
-				lock.lock();
+				if (!m_LocalTaskQ.empty()) {
+					//ローカルキューからタスクを取得
+					mp_CurrentTask = m_LocalTaskQ.front();
+					m_LocalTaskQ.pop_front();
+				}
+				else {
+					lock.unlock();
+					mp_CurrentTask = GetorStealTask();
+					lock.lock();
+				}
 
 				// タスク取得できればwaitを抜ける、できなければ再度waitする
 				if (mp_CurrentTask.has_value()) {

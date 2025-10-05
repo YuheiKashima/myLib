@@ -70,10 +70,10 @@ namespace myLib {
 
 		virtual void RegisterTask(std::shared_ptr<ThreadPoolTask> _task, bool _wakeupImmediately = true);
 
-	protected:
 #ifdef _DEBUG
 		virtual void RegisterTask(std::shared_ptr<ThreadPoolTask> _task, int32_t d_orderThreadIdx, bool _wakeupImmediately = true);
 #endif
+	protected:
 
 	private:
 		/**
