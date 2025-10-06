@@ -68,10 +68,10 @@ namespace myLib {
 		void WaitForIdle();
 		void Termination();
 
-		virtual void RegisterTask(std::shared_ptr<ThreadPoolTask> _task, bool _wakeupImmediately = true);
+		void RegisterTask(std::shared_ptr<ThreadPoolTask> _task, bool _wakeupImmediately = true);
 
 #ifdef _DEBUG
-		virtual void RegisterTask(std::shared_ptr<ThreadPoolTask> _task, int32_t d_orderThreadIdx, bool _wakeupImmediately = true);
+		void RegisterTask(std::shared_ptr<ThreadPoolTask> _task, int32_t d_orderThreadIdx, bool _wakeupImmediately = true);
 #endif
 	protected:
 
